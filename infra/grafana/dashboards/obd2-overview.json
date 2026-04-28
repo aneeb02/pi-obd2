@@ -1,0 +1,131 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "P_OBD2_FASTAPI"
+      },
+      "description": "Use the OBD2 FastAPI datasource and query /telemetry/range for pid=SPEED",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "content": "Speed panel starter. Configure query: `/telemetry/range?pid=SPEED`",
+        "mode": "markdown"
+      },
+      "title": "Vehicle Speed",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "P_OBD2_FASTAPI"
+      },
+      "description": "Use pid=RPM",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "content": "Engine RPM panel starter. Configure query: `/telemetry/range?pid=RPM`",
+        "mode": "markdown"
+      },
+      "title": "Engine RPM",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "P_OBD2_FASTAPI"
+      },
+      "description": "Use pid=COOLANT_TEMP",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "options": {
+        "content": "Coolant panel starter. Alert threshold suggestion: > 105 C",
+        "mode": "markdown"
+      },
+      "title": "Coolant Temp",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "P_OBD2_FASTAPI"
+      },
+      "description": "Use pid=THROTTLE_POS",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "id": 4,
+      "options": {
+        "content": "Throttle position panel starter. Query `/telemetry/range?pid=THROTTLE_POS`",
+        "mode": "markdown"
+      },
+      "title": "Throttle Position",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "simpod-json-datasource",
+        "uid": "P_OBD2_FASTAPI"
+      },
+      "description": "Use pid=ENGINE_LOAD",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
+      "id": 5,
+      "options": {
+        "content": "Engine load panel starter. Query `/telemetry/range?pid=ENGINE_LOAD`",
+        "mode": "markdown"
+      },
+      "title": "Engine Load",
+      "type": "text"
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": [
+    "obd2",
+    "raspberry-pi"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "OBD2 Overview",
+  "uid": "obd2-overview",
+  "version": 1,
+  "weekStart": ""
+}

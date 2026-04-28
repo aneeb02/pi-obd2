@@ -1,0 +1,5 @@
+fastapi
+uvicorn[standard]
+obd
+pydantic-settings
+python-dotenv

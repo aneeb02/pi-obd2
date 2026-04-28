@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Live Car Telemetry Dashboard for OBD2 Scanners">
+    <title>Live Telemetry</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: rgba(30, 41, 59, 0.7);
+            --border: rgba(255, 255, 255, 0.1);
+            --accent: #38bdf8;
+            --accent-glow: rgba(56, 189, 248, 0.5);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+        body {
+            margin: 0;
+            padding: 2rem;
+            background-color: var(--bg-color);
+            background-image: radial-gradient(circle at top right, #1e1b4b, #0f172a);
+            color: var(--text-main);
+            font-family: system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+        }
+        h1 {
+            text-align: center;
+            font-weight: 300;
+            letter-spacing: 4px;
+            margin-bottom: 3rem;
+            color: var(--accent);
+            text-shadow: 0 0 20px var(--accent-glow);
+        }
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .card {
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 2.5rem 2rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 15px var(--accent-glow);
+        }
+        .value {
+            font-size: 4rem;
+            font-weight: 700;
+            margin: 1rem 0 0.5rem 0;
+            background: linear-gradient(135deg, #fff, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            transition: transform 0.1s ease;
+        }
+        .unit {
+            font-size: 1.1rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .label {
+            font-size: 1.3rem;
+            font-weight: 500;
+            color: var(--accent);
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        .live-indicator {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #4ade80;
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: 1px;
+        }
+        .dot {
+            width: 10px;
+            height: 10px;
+            background-color: #4ade80;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+            box-shadow: 0 0 12px #4ade80;
+        }
+    </style>
+</head>
+<body>
+    <div class="live-indicator"><div class="dot"></div> LIVE STREAM</div>
+    <h1>VEHICLE TELEMETRY</h1>
+    <div class="dashboard" id="dashboard">
+        <!-- Cards generated dynamically by WebSocket data -->
+    </div>
+
+    <script>
+        const dashboard = document.getElementById('dashboard');
+        const cards = {};
+
+        function createCard(pid, name, unit) {
+            const card = document.createElement('div');
+            card.className = 'card';
+            card.innerHTML = `
+                <div class="label">${name.replace('_', ' ').toUpperCase()}</div>
+                <div class="value" id="val-${pid}">0</div>
+                <div class="unit">${unit}</div>
+            `;
+            dashboard.appendChild(card);
+            cards[pid] = document.getElementById(`val-${pid}`);
+        }
+
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${protocol}//${window.location.host}/telemetry/stream`);
+        
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (!cards[data.pid]) {
+                createCard(data.pid, data.name, data.unit);
+            }
+            
+            const el = cards[data.pid];
+            el.textContent = data.value;
+            
+            // Micro-animation for value pop
+            el.style.transform = 'scale(1.05)';
+            setTimeout(() => el.style.transform = 'scale(1)', 100);
+        };
+
+        ws.onclose = () => {
+            document.querySelector('.live-indicator').style.color = '#ef4444';
+            document.querySelector('.dot').style.backgroundColor = '#ef4444';
+            document.querySelector('.dot').style.boxShadow = '0 0 10px #ef4444';
+            document.querySelector('.dot').style.animation = 'none';
+            document.querySelector('.live-indicator').innerHTML = '<div class="dot" style="animation:none"></div> DISCONNECTED';
+        };
+    </script>
+</body>
+</html>

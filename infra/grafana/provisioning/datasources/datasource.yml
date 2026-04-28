@@ -1,0 +1,10 @@
+apiVersion: 1
+
+datasources:
+  - name: OBD2 FastAPI
+    uid: P_OBD2_FASTAPI
+    type: simpod-json-datasource
+    access: proxy
+    url: http://host.docker.internal:8000
+    isDefault: true
+    editable: true
