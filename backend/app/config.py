@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     reconnect_base_delay_seconds: float = Field(default=1.0, alias="RECONNECT_BASE_DELAY_SECONDS")
     reconnect_max_delay_seconds: float = Field(default=30.0, alias="RECONNECT_MAX_DELAY_SECONDS")
 
-    data_dir: Path = Field(default=Path("/home/dev/pi-obd2/data"), alias="DATA_DIR")
+    data_dir: Path = Field(default=Path(__file__).resolve().parent.parent.parent / "data", alias="DATA_DIR")
 
 
 @lru_cache

@@ -2,6 +2,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: pi-obd2-grafana
+    restart: always
     ports:
       - "3000:3000"
     environment:
