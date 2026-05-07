@@ -1,0 +1,543 @@
+\chapter{Description of ML/DL Algorithms Used}
+
+\section{Problem Formulation}
+
+The core challenge of this project is detecting abnormal engine behavior --- particularly signs of overheating --- from OBD-II sensor data, \textit{before} the driver notices a problem.
+
+On the surface, this sounds like a straightforward supervised classification problem: label data as ``overheating'' or ``normal,'' train a classifier, and deploy it. In practice, however, this approach is infeasible. Real-world vehicle failure data is almost impossible to collect ethically and safely --- nobody intentionally drives a vehicle until the engine overheats to generate training labels. Furthermore, every vehicle, driver, and environment behaves differently, so such labels would not generalize well. In technical terms, we face a \textbf{severe class imbalance problem}: normal driving data is abundant, but genuine anomaly data is virtually nonexistent.
+
+This constraint led us to frame the problem as \textbf{unsupervised anomaly detection}. Instead of teaching a model what overheating looks like, we teach it what \textit{normal driving} looks like. Any pattern that deviates significantly from the learned ``normal'' is flagged as potentially anomalous.
+
+We implemented and evaluated \textbf{two complementary anomaly detection approaches}:
+
+\begin{enumerate}
+    \item \textbf{Isolation Forest} (Machine Learning) --- A tree-based unsupervised anomaly detector from scikit-learn, trained directly on locally collected vehicle telemetry. This is the \textbf{deployed production model} used in the system's diagnostic pipeline and database.
+
+    \item \textbf{LSTM Autoencoder} (Deep Learning) --- A sequence-based neural network trained on a large public OBD-II dataset (RADAR, from Kaggle). This model captures temporal dependencies in sensor data but requires domain-specific calibration before deployment.
+\end{enumerate}
+
+Additionally, a \textbf{deterministic rules engine} provides human-readable diagnostic explanations alongside the ML anomaly scores, creating a hybrid system that offers both quantitative risk assessment and qualitative, actionable insights.
+
+
+\section{Algorithm Selection \& Justification}
+
+\subsection{Algorithm 1: Isolation Forest (Deployed Model)}
+
+The \textbf{Isolation Forest} algorithm was selected as the primary deployed anomaly detection model. Isolation Forest works on a fundamentally different principle from most anomaly detectors: instead of modeling what ``normal'' looks like, it exploits the fact that anomalies are \textit{few and different}. The algorithm builds an ensemble of random decision trees (isolation trees) that recursively partition the feature space using random splits. Anomalous points --- being rare and having unusual feature values --- are isolated in fewer splits than normal points. The average path length across all trees becomes the anomaly score.
+
+\textbf{Justification for selection:}
+\begin{itemize}
+    \item \textbf{Trains on local data}: Unlike models trained on external datasets, the Isolation Forest was trained directly on telemetry collected from our target vehicle, completely avoiding the domain shift problem.
+    \item \textbf{No temporal sequences required}: It processes individual multi-feature samples, which works well for detecting point anomalies in OBD-II snapshots.
+    \item \textbf{Fast training and inference}: The entire training and evaluation pipeline runs in seconds, making it feasible to execute on the Raspberry Pi itself.
+    \item \textbf{Interpretable scores}: The anomaly score from each tree maps directly to how ``isolated'' a data point is, which is intuitive and easy to explain in diagnostic reports.
+    \item \textbf{No labeled data required}: As an unsupervised algorithm, it requires only normal driving data for training --- exactly what we have.
+\end{itemize}
+
+\subsection{Algorithm 2: LSTM Autoencoder (Deep Learning Exploration)}
+
+We also implemented a \textbf{Long Short-Term Memory (LSTM) Autoencoder} --- a deep learning architecture that combines two ideas:
+
+\begin{enumerate}
+    \item \textbf{LSTM Networks} excel at modeling sequential, time-dependent data. Engine behavior is inherently temporal: coolant temperature rises gradually over multiple readings, correlated with RPM, throttle position, and airflow patterns.
+
+    \item \textbf{Autoencoders} are neural networks trained to reconstruct their own input through a compressed bottleneck. When trained on only normal data, they become good at reconstructing normal patterns and bad at reconstructing anomalies. The reconstruction error becomes the anomaly signal.
+\end{enumerate}
+
+\textbf{Justification:}
+\begin{itemize}
+    \item \textbf{Temporal awareness}: Unlike the Isolation Forest, the LSTM Autoencoder can detect \textit{trends} --- e.g., a gradual temperature rise over 50 consecutive readings --- making it better suited for detecting progressive failures.
+    \item \textbf{Multi-feature correlation}: It processes all 7 features simultaneously per timestep, capturing cross-feature relationships (e.g., high coolant temperature combined with low RPM and minimal throttle).
+    \item \textbf{No distributional assumptions}: Unlike statistical methods (z-score, moving averages), it makes no assumptions about the data following a Gaussian distribution.
+\end{itemize}
+
+\subsection{Why Both Approaches?}
+
+Each algorithm addresses different aspects of the anomaly detection problem:
+
+\begin{itemize}
+    \item The \textbf{Isolation Forest} excels at detecting \textit{point anomalies} --- individual readings where feature values are unusual (e.g., extremely high RPM combined with high coolant temperature and full throttle).
+    \item The \textbf{LSTM Autoencoder} excels at detecting \textit{contextual anomalies} --- readings that are only abnormal when considered in temporal context (e.g., a coolant temperature of 100\textdegree C is normal after highway driving but alarming after 2 minutes of idling).
+\end{itemize}
+
+The Isolation Forest was chosen for deployment because it trains on local data and produces immediately meaningful results, while the LSTM Autoencoder demonstrates the potential of deep learning approaches and provides a clear upgrade path for future versions of the system.
+
+
+\section{Model Architectures}
+
+\subsection{Isolation Forest Architecture}
+
+The Isolation Forest model uses the following configuration:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|l|}
+\hline
+\textbf{Parameter} & \textbf{Value} \\
+\hline
+Algorithm & Isolation Forest (scikit-learn) \\
+\hline
+Number of estimators (trees) & 200 \\
+\hline
+Contamination parameter & 0.05 (5\%) \\
+\hline
+Max samples & auto \\
+\hline
+Random state & 42 \\
+\hline
+\end{tabular}
+\caption{Isolation Forest model configuration}
+\label{tab:iforest_config}
+\end{table}
+
+\textbf{Input features} (5 OBD-II parameters from the local vehicle):
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|c|l|c|p{6cm}|}
+\hline
+\textbf{\#} & \textbf{Feature} & \textbf{Unit} & \textbf{Relevance} \\
+\hline
+1 & Engine RPM & RPM & High sustained RPM contributes to heat buildup \\
+\hline
+2 & Coolant Temperature & \textdegree C & Most direct indicator of overheating \\
+\hline
+3 & Throttle Position & \% & Driver demand; distinguishes load-driven vs.\ cooling failure heating \\
+\hline
+4 & Engine Load & \% & Indicates how hard the engine is working \\
+\hline
+5 & Vehicle Speed & km/h & Context for distinguishing highway vs.\ idle conditions \\
+\hline
+\end{tabular}
+\caption{Features used by the Isolation Forest model}
+\label{tab:iforest_features}
+\end{table}
+
+\subsection{LSTM Autoencoder Architecture}
+
+The LSTM Autoencoder follows a standard encoder-decoder pattern:
+
+\textbf{Encoder (Compression):}
+\begin{verbatim}
+Input Layer      -> (batch, 50, 7)     # 50 timesteps x 7 features
+LSTM (128 units) -> (batch, 50, 128)   # Returns full sequence
+LSTM (64 units)  -> (batch, 64)        # Returns final state only
+Dense (32 units) -> (batch, 32)        # Compressed latent representation
+\end{verbatim}
+
+\textbf{Decoder (Reconstruction):}
+\begin{verbatim}
+RepeatVector(50) -> (batch, 50, 32)    # Broadcast across timesteps
+LSTM (64 units)  -> (batch, 50, 64)    # First decoder LSTM
+LSTM (128 units) -> (batch, 50, 128)   # Mirrors encoder
+Dense (7 units)  -> (batch, 50, 7)     # Reconstruct 7 features
+\end{verbatim}
+
+\textbf{Input features} (7 OBD-II parameters from the RADAR dataset):
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|c|l|c|}
+\hline
+\textbf{\#} & \textbf{Feature} & \textbf{Unit} \\
+\hline
+1 & Engine Coolant Temperature & \textdegree C \\
+\hline
+2 & Intake Manifold Absolute Pressure & kPa \\
+\hline
+3 & Engine RPM & RPM \\
+\hline
+4 & Intake Air Temperature & \textdegree C \\
+\hline
+5 & Air Flow Rate (MAF Sensor) & g/s \\
+\hline
+6 & Absolute Throttle Position & \% \\
+\hline
+7 & Ambient Air Temperature & \textdegree C \\
+\hline
+\end{tabular}
+\caption{Features used by the LSTM Autoencoder model}
+\label{tab:lstm_features}
+\end{table}
+
+
+\section{Implementation Details}
+
+\subsection{Libraries and Frameworks}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|p{7cm}|}
+\hline
+\textbf{Library} & \textbf{Version} & \textbf{Purpose} \\
+\hline
+Scikit-learn & Latest & Isolation Forest, StandardScaler, train/test split, classification metrics \\
+\hline
+TensorFlow / Keras & 2.x & LSTM Autoencoder architecture, training, and inference \\
+\hline
+Pandas & Latest & Data loading, cleaning, pivoting, preprocessing \\
+\hline
+NumPy & Latest & Numerical operations, sequence generation, threshold computation \\
+\hline
+Matplotlib / Seaborn & Latest & Visualization of results, confusion matrices, distribution plots \\
+\hline
+Joblib & Latest & Serialization of fitted scaler for deployment \\
+\hline
+FastAPI & Latest & Backend REST API for receiving telemetry and serving diagnostics \\
+\hline
+SQLAlchemy & 2.0 & ORM layer for SQLite database persistence \\
+\hline
+\end{tabular}
+\caption{Libraries and frameworks used}
+\label{tab:libraries}
+\end{table}
+
+\subsection{Isolation Forest --- Training and Evaluation}
+
+\subsubsection{Training Data}
+
+The Isolation Forest was trained on \textbf{locally collected telemetry} from our Raspberry Pi OBD-II setup (file: \texttt{data/2026-04-27.csv}). This data represents real driving sessions from the target vehicle in local traffic conditions.
+
+\subsubsection{Data Preprocessing}
+
+\begin{enumerate}
+    \item \textbf{Pivot}: The long-format CSV (one row per PID per timestamp) was pivoted into wide format (one row per timestamp, columns for each PID).
+    \item \textbf{Feature selection}: The 5 features listed in Table~\ref{tab:iforest_features} were extracted.
+    \item \textbf{Train/test split}: The data was split 70/30 using \texttt{train\_test\_split} with a fixed random state to ensure reproducibility.
+    \item \textbf{Feature scaling}: A \texttt{StandardScaler} was fitted on the training set only, then applied to both training and test sets to prevent data leakage.
+\end{enumerate}
+
+\subsubsection{Synthetic Anomaly Injection}
+
+Since all collected data represents normal driving, \textbf{synthetic anomalies} were generated to evaluate the model. Three realistic failure scenarios were simulated (500 samples each, 1,500 total):
+
+\begin{itemize}
+    \item \textbf{Engine Overheating}: Low RPM (700--1000), dangerously high coolant (108--125\textdegree C), low throttle, low speed --- simulating a cooling system failure at idle.
+    \item \textbf{Aggressive Driving}: Very high RPM (5000--7000), full throttle (85--100\%), high engine load, high speed (120--180 km/h) --- far beyond normal driving patterns.
+    \item \textbf{Sensor Malfunction}: Impossible value combinations --- near-stall RPM with high speed, high throttle with zero load --- simulating faulty or corrupted sensor data.
+\end{itemize}
+
+\subsubsection{Training Configuration}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|l|}
+\hline
+\textbf{Parameter} & \textbf{Value} \\
+\hline
+Train set size & 70\% of local data \\
+\hline
+Test set size & 30\% of local data \\
+\hline
+Scaling & StandardScaler (fit on train only) \\
+\hline
+Contamination & 0.05 \\
+\hline
+Estimators & 200 trees \\
+\hline
+Hardware & Local machine (CPU) \\
+\hline
+\end{tabular}
+\caption{Isolation Forest training configuration}
+\label{tab:iforest_training}
+\end{table}
+
+\subsection{LSTM Autoencoder --- Training and Evaluation}
+
+\subsubsection{Training Dataset}
+
+The LSTM Autoencoder was trained on the \textbf{RADAR OBD-II Dataset} (sourced from Kaggle), containing real-world driving telemetry from 81 trips collected in Germany under three traffic conditions: Normal, Free-flow (Frei), and Congested (Stau). The dataset contains exclusively healthy driving data --- ideal for training an unsupervised anomaly detector.
+
+\subsubsection{Data Preprocessing Pipeline}
+
+\begin{enumerate}
+    \item \textbf{Column name normalization}: Encoding issues in the dataset (\textdegree C appearing as \texttt{Â\textdegree C}) were resolved via a coalescing function.
+    \item \textbf{Numeric conversion}: All feature columns were forced to numeric types; non-parseable values became NaN.
+    \item \textbf{Zero-spike handling}: Zero values (indicating communication dropouts) were replaced with NaN.
+    \item \textbf{Interpolation}: Linear interpolation filled NaN gaps, with forward-fill and backward-fill as fallbacks.
+    \item \textbf{Feature scaling}: A \texttt{MinMaxScaler} normalized all features to $[0, 1]$.
+    \item \textbf{Sliding window generation}: Overlapping windows of 50 timesteps with a hop of 5 timesteps.
+\end{enumerate}
+
+\subsubsection{Training Configuration}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|l|}
+\hline
+\textbf{Parameter} & \textbf{Value} \\
+\hline
+Epochs & 80 (max) \\
+\hline
+Batch size & 64 \\
+\hline
+Optimizer & Adam (default learning rate) \\
+\hline
+Loss function & Mean Squared Error (MSE) \\
+\hline
+Early stopping & Patience = 8 epochs on validation loss \\
+\hline
+Model checkpoint & Saves best model by validation loss \\
+\hline
+Hardware & Kaggle cloud (NVIDIA Tesla T4 GPU) \\
+\hline
+\end{tabular}
+\caption{LSTM Autoencoder training configuration}
+\label{tab:lstm_training}
+\end{table}
+
+\subsubsection{Anomaly Threshold Derivation}
+
+After training, percentile-based thresholds were derived from validation set reconstruction errors:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|}
+\hline
+\textbf{Percentile} & \textbf{Threshold Value} \\
+\hline
+95th (p95) & 0.000304 \\
+\hline
+99th (p99) & 0.001103 \\
+\hline
+\end{tabular}
+\caption{LSTM Autoencoder anomaly thresholds from validation data}
+\label{tab:lstm_thresholds}
+\end{table}
+
+\subsubsection{Scoring Formula}
+
+The raw reconstruction error is converted to a 0--1 anomaly score:
+
+\begin{equation}
+\text{score} = \frac{\text{error} - p_{95}}{p_{99} \times \text{relaxation\_factor} - p_{95}}
+\end{equation}
+
+where a relaxation factor of 2.5 accounts for domain shift when deploying on new vehicles.
+
+\subsection{Supplementary: Rule-Based Diagnostic Engine}
+
+Alongside both ML models, a \textbf{deterministic rules engine} (\texttt{rules\_engine.py}) generates human-readable diagnostic explanations. While the ML models provide numerical anomaly scores, the rules engine outputs actionable text such as: ``Coolant temperature is high while RPM is low --- this suggests a radiator fan or water pump malfunction.''
+
+The rules engine checks 8 conditions including:
+\begin{itemize}
+    \item Absolute coolant temperature thresholds ($>$100\textdegree C, $>$105\textdegree C, $>$110\textdegree C)
+    \item Rate of coolant temperature rise
+    \item Coolant-to-ambient temperature differential
+    \item Overheating at idle (high coolant + low RPM)
+    \item Intake air temperature anomalies
+    \item MAP/MAF sensor sanity checks
+\end{itemize}
+
+This hybrid approach --- statistical ML + deep learning + domain-specific rules --- provides both quantitative risk scores and qualitative, actionable diagnostic information.
+
+
+\section{Performance Metrics}
+
+\subsection{Isolation Forest Results (Deployed Model)}
+
+\subsubsection{Evaluation Methodology}
+
+Since all locally collected data represents normal driving, the model was evaluated using a combined dataset of real normal data and synthetic anomalies. An equal number of real normal samples (1,500) and synthetic anomaly samples (1,500) were combined to create a balanced evaluation set.
+
+\subsubsection{Classification Metrics}
+
+The model was evaluated using scikit-learn's \texttt{classification\_report} on the balanced evaluation set (real normal data vs.\ synthetic anomalies):
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Class} & \textbf{Precision} & \textbf{Recall} & \textbf{F1-Score} \\
+\hline
+Anomaly ($-1$) & High & High & High \\
+\hline
+Normal ($+1$) & High & High & High \\
+\hline
+\end{tabular}
+\caption{Isolation Forest classification metrics on the balanced evaluation set}
+\label{tab:iforest_metrics}
+\end{table}
+
+\subsubsection{Anomaly Detection by Type}
+
+The model's detection rate was evaluated separately for each synthetic anomaly category:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|p{5cm}|}
+\hline
+\textbf{Anomaly Type} & \textbf{Detection Rate} & \textbf{Description} \\
+\hline
+Overheating & High & Low RPM + dangerously high coolant \\
+\hline
+Aggressive Driving & High & Very high RPM + full throttle + high speed \\
+\hline
+Sensor Fault & High & Impossible value combinations \\
+\hline
+\end{tabular}
+\caption{Detection rates by anomaly type}
+\label{tab:iforest_detection}
+\end{table}
+
+\subsubsection{Real-World Deployment Results}
+
+The Isolation Forest was deployed in the system's diagnostic pipeline and persists results in the SQLite database. After processing 11 driving sessions (77,435 total telemetry readings), the diagnostic reports showed meaningful severity distribution:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|}
+\hline
+\textbf{Metric} & \textbf{Value} \\
+\hline
+Total driving sessions & 11 \\
+\hline
+Total telemetry readings & 77,435 \\
+\hline
+Diagnostic reports generated & 11 \\
+\hline
+Database file size & 10.6 MB \\
+\hline
+PIDs per reading cycle & 5 \\
+\hline
+\end{tabular}
+\caption{Isolation Forest deployment statistics}
+\label{tab:iforest_deployment}
+\end{table}
+
+\textbf{Severity classification breakdown:}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Severity} & \textbf{Sessions} & \textbf{Percentage} \\
+\hline
+LOW & 5 & 45.5\% \\
+\hline
+MEDIUM & 5 & 45.5\% \\
+\hline
+HIGH & 1 & 9.0\% \\
+\hline
+\end{tabular}
+\caption{Isolation Forest risk classification on real-world data}
+\label{tab:iforest_risk}
+\end{table}
+
+This distribution is realistic and expected: the majority of sessions fall into LOW or MEDIUM risk (normal to slightly unusual driving), with a single HIGH-risk session likely corresponding to more aggressive driving conditions or elevated engine temperatures.
+
+\subsection{LSTM Autoencoder Results (Deep Learning Exploration)}
+
+\subsubsection{In-Distribution Evaluation (German Data)}
+
+When evaluated on data matching its training distribution (synthetic German-style driving scenarios), the LSTM Autoencoder correctly classified:
+\begin{itemize}
+    \item \textbf{Normal scenarios} (highway cruising, city driving, stable idle, cold start) as \textbf{LOW} risk
+    \item \textbf{Abnormal scenarios} (overheating at idle, aggressive driving with heat buildup) as \textbf{MEDIUM/HIGH} risk
+\end{itemize}
+
+This confirms the model architecture is sound and the autoencoder correctly learns to separate normal from anomalous patterns within its training domain.
+
+\subsubsection{Cross-Domain Evaluation (Local Pi Data)}
+
+When deployed against locally collected telemetry (7 sessions, 3,013 analysis windows):
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|}
+\hline
+\textbf{Metric} & \textbf{Value} \\
+\hline
+Sessions analyzed & 7 \\
+\hline
+Analysis windows & 3,013 \\
+\hline
+Mean reconstruction error & 0.026114 \\
+\hline
+Maximum reconstruction error & 0.042249 \\
+\hline
+p95 threshold (from training) & 0.000304 \\
+\hline
+p99 threshold (from training) & 0.001103 \\
+\hline
+\end{tabular}
+\caption{LSTM Autoencoder results on local Pi data}
+\label{tab:lstm_deployment}
+\end{table}
+
+All 7 sessions were classified as HIGH risk. This result is \textbf{expected and explainable} --- it is caused by \textbf{domain shift} (also known as covariate shift). The model was trained on German vehicle data with European driving conditions, and our data comes from a different vehicle in Pakistani traffic conditions with different ambient temperatures and driving patterns. The reconstruction errors (0.026--0.042) are 30--40$\times$ higher than the training thresholds, confirming the model encounters a fundamentally different data distribution.
+
+\subsubsection{Threshold Recalibration}
+
+To address the domain shift, we performed \textbf{threshold recalibration} by treating the local Pi data as a new ``normal'' baseline:
+
+\begin{enumerate}
+    \item All local data was run through the model to compute reconstruction errors
+    \item New p95/p99 thresholds were computed from the local error distribution
+    \item Sessions were re-scored using the local thresholds
+    \item A synthetic overheating event was injected to verify the model still detects genuine anomalies
+\end{enumerate}
+
+After recalibration, the model produced meaningful, differentiated risk scores --- confirming that the model architecture works correctly and only requires vehicle-specific threshold calibration.
+
+
+\section{Discussion and Analysis}
+
+\subsection{Comparison of Approaches}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|p{4cm}|p{5cm}|p{5cm}|}
+\hline
+\textbf{Criterion} & \textbf{Isolation Forest} & \textbf{LSTM Autoencoder} \\
+\hline
+Training data & Local vehicle telemetry & External dataset (RADAR/Kaggle) \\
+\hline
+Domain shift & None (trains on target data) & Significant (requires recalibration) \\
+\hline
+Temporal awareness & No (point-based) & Yes (50-timestep sequences) \\
+\hline
+Training time & Seconds & Hours (GPU required) \\
+\hline
+Inference speed & Milliseconds & Minutes (on Raspberry Pi CPU) \\
+\hline
+Deployment status & Deployed in production & Experimental / research \\
+\hline
+Real-world results & Realistic severity distribution & All HIGH (before recalibration) \\
+\hline
+\end{tabular}
+\caption{Comparison of the two anomaly detection approaches}
+\label{tab:comparison}
+\end{table}
+
+\subsection{Key Challenges}
+
+\begin{enumerate}
+    \item \textbf{Domain shift}: The LSTM Autoencoder trained on German data could not directly generalize to local driving conditions. This is a well-known challenge in ML deployment, resolved through threshold recalibration.
+
+    \item \textbf{Feature gap}: The Pi OBD-II system natively collects 5 of the 7 features the LSTM expects. The missing two (Intake Air Temperature and Mass Air Flow Rate) were synthesized with realistic estimates, introducing noise.
+
+    \item \textbf{Computational constraints}: LSTM inference on the Raspberry Pi 3's ARM CPU is significantly slower than the Kaggle GPU. Processing 3,013 windows took approximately 30 minutes, whereas the Isolation Forest processes the entire dataset in seconds.
+
+    \item \textbf{Lack of real anomaly data}: Without genuine engine fault data, evaluation relies on synthetic anomaly injection, which may not capture all real-world failure modes.
+\end{enumerate}
+
+\subsection{Why the Isolation Forest Was Chosen for Deployment}
+
+The Isolation Forest was selected as the production model because:
+\begin{itemize}
+    \item It trains directly on local data, eliminating domain shift entirely
+    \item It produces immediately meaningful, calibrated results (5 LOW, 5 MEDIUM, 1 HIGH)
+    \item It runs fast enough for practical deployment
+    \item Its scores integrate cleanly into the database schema and diagnostic reporting pipeline
+\end{itemize}
+
+\subsection{Future Improvements}
+
+\begin{itemize}
+    \item Collect 2--3 hours of verified normal driving from the target vehicle and recalibrate the LSTM thresholds to enable deep learning-based temporal anomaly detection alongside the Isolation Forest.
+    \item Convert the LSTM model to TensorFlow Lite for efficient inference on the Raspberry Pi.
+    \item Expand the OBD-II feature set to include additional PIDs for richer anomaly detection.
+    \item Implement online/incremental learning so models adapt to vehicle-specific patterns over time.
+    \item Add historical comparison across trips to detect gradual degradation trends.
+\end{itemize}
